@@ -235,6 +235,7 @@ var flippers = [];
 /* 新增得分點 */
 var topLanes = [];                                             // 頂部三條燈道
 var sideLanes = [];                                            // 左右外道燈
+var slots = [];                                                // 頂部老虎機
 var spinner = { x: 408, y: 452, r: 19, angle: 0, omega: 0, cool: 0, flash: 0, hits: 0 };
 
 /* 單向閘（check valve）：發射通道口只准出、唔准入 */
@@ -329,13 +330,11 @@ function buildTable() {
   }
 
   // 碰碰柱
-  // 碰碰柱：上面三粒大，中間四粒細
+  // 碰碰柱：上面三粒大，中間兩粒細
   var bdef = [
     { x: 168, y: 344, r: 25, pal: 0, score: 100, kick: 560 },
     { x: 260, y: 344, r: 25, pal: 1, score: 100, kick: 560 },
     { x: 352, y: 344, r: 25, pal: 2, score: 100, kick: 560 },
-    { x: 304, y: 660, r: 14, pal: 3, score: 300, kick: 400 },
-    { x: 216, y: 660, r: 14, pal: 4, score: 300, kick: 400 },
     { x: 216, y: 572, r: 14, pal: 5, score: 300, kick: 400 },
     { x: 304, y: 572, r: 14, pal: 6, score: 300, kick: 400 }
   ];
@@ -362,6 +361,19 @@ function buildTable() {
   sideLanes.length = 0;
   sideLanes.push({ x0: 54, x1: 112, y: 632, lit: false, flash: 0, side: -1, hue: 140 });
   sideLanes.push({ x0: 394, x1: 448, y: 632, lit: false, flash: 0, side: 1, hue: 300 });
+
+  // 頂部老虎機（撞到會轉，隨機出數字）
+  slots.length = 0;
+  var slX = [150, 260, 370];
+  for (var si = 0; si < slX.length; si++) {
+    slots.push({
+      x0: slX[si] - 31, x1: slX[si] + 31,
+      y0: 116, y1: 168,
+      spin: 0, cool: 0, flash: 0,
+      d: [7, 7, 7],
+      hue: [45, 160, 300][si]
+    });
+  }
 
   // 頂部三條燈道
   topLanes.length = 0;
@@ -681,7 +693,69 @@ function resolveAll() {
   for (var j = 0; j < bumpers.length; j++) hitBumper(bumpers[j]);
   hitSpinner();
   for (var k = 0; k < targets.length; k++) hitTarget(targets[k]);
+  trySlots();
   for (var m = 0; m < flippers.length; m++) hitFlipper(flippers[m]);
+}
+
+function trySlots() {
+  for (var i = 0; i < slots.length; i++) hitSlot(slots[i]);
+}
+
+function hitSlot(s) {
+  var cx = clamp(ball.x, s.x0, s.x1);
+  var cy = clamp(ball.y, s.y0, s.y1);
+  var dx = ball.x - cx, dy = ball.y - cy;
+  var d2 = dx * dx + dy * dy;
+  if (d2 >= ball.r * ball.r) return;
+
+  var nx, ny, pen;
+  if (d2 > 1e-9) {
+    var d = Math.sqrt(d2);
+    nx = dx / d; ny = dy / d; pen = ball.r - d;
+  } else {
+    nx = 0; ny = 1; pen = ball.r;
+  }
+  ball.x += nx * pen;
+  ball.y += ny * pen;
+
+  var vn = ball.vx * nx + ball.vy * ny;
+  if (vn < 0) {
+    var tx = ball.vx - vn * nx, ty = ball.vy - vn * ny;
+    var e = 0.46;
+    ball.vx = tx + (-vn * e) * nx;
+    ball.vy = ty + (-vn * e) * ny;
+  }
+
+  if (s.cool > 0 || s.spin > 0) return;
+
+  s.spin = 1.0;
+  s.cool = 1.35;
+  s.flash = 1;
+  Sound.target();
+  bumpCombo();
+  addShake(2);
+  vibrate(10);
+}
+
+function awardSlot(s) {
+  var n = s.d[0] * 100 + s.d[1] * 10 + s.d[2];
+  var triple = (s.d[0] === s.d[1] && s.d[1] === s.d[2]);
+  var v = Math.round(n * 2 * game.mult);
+  if (triple) v *= 3;
+  game.score += v;
+
+  var cx = (s.x0 + s.x1) * 0.5;
+  popups.push({
+    x: cx, y: s.y1 + 26,
+    text: (triple ? 'JACKPOT  ' : '') + n + '　+' + fmt(v),
+    life: 1.5, max: 1.5,
+    color: triple ? '#ffd84d' : '#9ff6ff',
+    size: triple ? 19 : 16, vy: -30
+  });
+  addRipple(cx, (s.y0 + s.y1) * 0.5, 44, triple ? 'rgba(255,216,80,' : 'rgba(120,220,255,');
+  Sound.bank();
+  addShake(triple ? 7 : 3);
+  if (triple) vibrate(45);
 }
 
 function hitSpinner() {
@@ -943,6 +1017,9 @@ function startGame() {
   for (var ri = 0; ri < rollovers.length; ri++) { rollovers[ri].lit = false; rollovers[ri].flash = 0; }
   for (var ti2 = 0; ti2 < topLanes.length; ti2++) { topLanes[ti2].lit = false; topLanes[ti2].flash = 0; }
   for (var si2 = 0; si2 < sideLanes.length; si2++) { sideLanes[si2].lit = false; sideLanes[si2].flash = 0; }
+  for (var si3 = 0; si3 < slots.length; si3++) {
+    slots[si3].spin = 0; slots[si3].cool = 0; slots[si3].flash = 0; slots[si3].d = [7, 7, 7];
+  }
   game.combo = 0;
   game.comboT = 0;
   spinner.angle = 0; spinner.omega = 0; spinner.cool = 0; spinner.flash = 0; spinner.hits = 0;
@@ -1152,6 +1229,23 @@ function update(dt) {
   spinner.angle += spinner.omega * dt;
   spinner.omega *= Math.max(0, 1 - dt * 1.7);
   if (spinner.flash > 0) spinner.flash = Math.max(0, spinner.flash - dt * 4);
+
+  // 老虎機
+  for (i = 0; i < slots.length; i++) {
+    var sl = slots[i];
+    if (sl.flash > 0) sl.flash = Math.max(0, sl.flash - dt * 3);
+    if (sl.cool > 0) sl.cool = Math.max(0, sl.cool - dt);
+    if (sl.spin > 0) {
+      sl.spin -= dt;
+      for (var dq = 0; dq < 3; dq++) {
+        if (sl.spin > (0.66 - dq * 0.33)) sl.d[dq] = 1 + Math.floor(Math.random() * 9);
+      }
+      if (sl.spin <= 0) {
+        sl.spin = 0;
+        awardSlot(sl);
+      }
+    }
+  }
 
   if (game.shake > 0) game.shake = Math.max(0, game.shake - dt * 26);
   if (game.laneFlash > 0) game.laneFlash = Math.max(0, game.laneFlash - dt * 2.2);
@@ -1627,6 +1721,61 @@ function drawBulbs(t) {
   ctx.restore();
 }
 
+/* 老虎機 */
+function drawSlot(s, t) {
+  var w = s.x1 - s.x0, h = s.y1 - s.y0;
+  var cx = (s.x0 + s.x1) * 0.5;
+  var f = s.flash > 0 ? s.flash : 0;
+  var pal = [
+    { rim: '#ffd84d', glow: 'rgba(255,216,77,0.95)', on: '#fff3b0' },
+    { rim: '#7dff9a', glow: 'rgba(120,255,150,0.95)', on: '#d8ffe4' },
+    { rim: '#ff8ae0', glow: 'rgba(255,120,220,0.95)', on: '#ffe0f6' }
+  ][s.hue === 45 ? 0 : (s.hue === 160 ? 1 : 2)];
+
+  ctx.save();
+
+  rr(s.x0, s.y0, w, h, 8);
+  var g = ctx.createLinearGradient(0, s.y0, 0, s.y1);
+  g.addColorStop(0, '#3a2a10');
+  g.addColorStop(0.5, '#1b1408');
+  g.addColorStop(1, '#0d0a05');
+  ctx.fillStyle = g;
+  ctx.fill();
+  ctx.strokeStyle = pal.rim;
+  ctx.lineWidth = 2;
+  ctx.shadowColor = pal.glow;
+  ctx.shadowBlur = 10 + f * 24 + (s.spin > 0 ? 8 : 0);
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  var cw = (w - 14) / 3;
+  for (var i = 0; i < 3; i++) {
+    var x = s.x0 + 7 + i * cw;
+    rr(x + 1.5, s.y0 + 8, cw - 3, h - 16, 4);
+    ctx.fillStyle = 'rgba(4,6,14,0.92)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,220,120,0.3)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    var spinning = s.spin > (0.66 - i * 0.33);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = spinning ? 'rgba(150,170,225,0.85)' : pal.on;
+    ctx.font = '700 17px "Consolas", monospace';
+    var dv = spinning ? (1 + Math.floor(Math.random() * 9)) : s.d[i];
+    ctx.fillText(String(dv), x + cw / 2, s.y0 + h / 2 + 1);
+  }
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = 'rgba(255,230,160,0.7)';
+  ctx.font = '600 7.5px "Segoe UI", sans-serif';
+  ctx.fillText('S L O T', cx, s.y0 - 4);
+
+  ctx.restore();
+}
+
 function drawPlayfield(t) {
   var shape = tableShape();
 
@@ -1778,6 +1927,9 @@ function drawPlayfield(t) {
 
   /* --- 外道燈 --- */
   for (var sli = 0; sli < sideLanes.length; sli++) drawSideLane(sideLanes[sli]);
+
+  /* --- 老虎機 --- */
+  for (var sxi = 0; sxi < slots.length; sxi++) drawSlot(slots[sxi], t);
 
   /* --- 碰碰柱 --- */
   for (var j = 0; j < bumpers.length; j++) drawBumper(bumpers[j], t);
