@@ -126,9 +126,22 @@ if (window.visualViewport) {
   window.visualViewport.addEventListener('scroll', function () { setTimeout(resize, 60); });
 }
 
+// 螢幕上任何一點都要有反應：手機上下留白、屏幕最左／最右邊一律夾入畫布座標
 function toLogical(e) {
   var r = canvas.getBoundingClientRect();
-  return { x: (e.clientX - r.left) / viewScale, y: (e.clientY - r.top) / viewScale };
+  var insideY = e.clientY >= r.top && e.clientY <= r.bottom;
+  var insideX = e.clientX >= r.left && e.clientX <= r.right;
+  var cx = clamp(e.clientX, r.left, r.right);
+  var cy = clamp(e.clientY, r.top, r.bottom);
+  var x = (cx - r.left) / viewScale;
+  var y = (cy - r.top) / viewScale;
+  // 上下留白：夾入枱面（跳過標題列／選單列），避免撳到黑邊等於撳到標題掣
+  if (!insideY) y = HUD_H + clamp(y - HUD_H, 0, PH);
+  return {
+    x: x, y: y,
+    offRight: !insideX && e.clientX > r.right,   // 畫布右邊以外嘅黑邊
+    inside: insideX && insideY
+  };
 }
 
 /* =========================================================
@@ -1119,7 +1132,11 @@ window.addEventListener('blur', function () {
 
 var pointers = {};
 
-canvas.addEventListener('pointerdown', function (e) {
+/* 注意：listener 掛喺 window（唔係 canvas），因為畫布以外嘅位
+   （手機上下留白、橫放時左右黑邊、屏幕最右邊）本身收唔到 event，
+   以前撳落去完全無反應。 */
+window.addEventListener('pointerdown', function (e) {
+  if (e.button > 0) return;            // 只理主鍵／觸控
   e.preventDefault();
   Sound.ensure();
   var p = toLogical(e);
@@ -1131,10 +1148,10 @@ canvas.addEventListener('pointerdown', function (e) {
     return;
   }
 
-  // 右側面板唔接受擊拍／發射
-  if (!compact && p.x >= PANEL_X) return;
+  // 右側面板唔接受擊拍／發射（但畫布右邊以外嘅黑邊唔算面板）
+  if (!compact && !p.offRight && p.x >= PANEL_X) return;
 
-  // 發射膠囊：手機最好撳
+  // 發射膠囊：手機最好撳（只有真係有波可以發射先會出現／生效）
   if (canLaunch() && hitLaunchPill(p)) {
     pointers[e.pointerId] = 'P';
     plungerDown();
@@ -1148,8 +1165,10 @@ canvas.addEventListener('pointerdown', function (e) {
     return;
   }
 
-  // 通道區域（擴大到整條通道）
-  if (py > 620 && p.x > LANE_X - 12) {
+  // 通道區域：只有波真係停喺通道（可以發射）時，右下角先當發射掣。
+  // 以前呢個判斷無視 canLaunch()，令右下角一大片（包括畫面寫住
+  // 「右拍 ▶」嘅位置）被食掉，撳落去右拍完全無反應。
+  if (canLaunch() && py > 620 && p.x > LANE_X - 12) {
     pointers[e.pointerId] = 'P';
     plungerDown();
     return;
@@ -1168,10 +1187,10 @@ function pointerEnd(e) {
   if (role === 'L') setFlipper(0, false);
   if (role === 'R') setFlipper(1, false);
 }
-canvas.addEventListener('pointerup', pointerEnd);
-canvas.addEventListener('pointercancel', pointerEnd);
-canvas.addEventListener('pointerleave', pointerEnd);
-canvas.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+window.addEventListener('pointerup', pointerEnd);
+window.addEventListener('pointercancel', pointerEnd);
+canvas.addEventListener('pointerleave', pointerEnd);   // 滑鼠滑出畫布時放手
+window.addEventListener('contextmenu', function (e) { e.preventDefault(); });
 
 /* ---------------- 觸控輔助 ---------------- */
 function vibrate(ms) {
